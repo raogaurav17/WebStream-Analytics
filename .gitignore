@@ -1,0 +1,75 @@
+# ==========================================
+#  Python (Recursive)
+# ==========================================
+# Matches __pycache__ in root, app/, spark_jobs/, etc.
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/*.so
+
+# Virtual Environments
+venv/
+.venv/
+env/
+.env/
+
+# Distribution / Packaging
+**/*.egg-info/
+.eggs/
+dist/
+build/
+
+# ==========================================
+#  Secrets & Environment (CRITICAL)
+# ==========================================
+# Ignore .env files in deploy/, app/, or root
+**/.env
+**/.env.*
+# Exception: We DO want to commit the example file
+!**/.env.example
+
+# ==========================================
+#  Docker & Infrastructure Data
+# ==========================================
+# These are the specific mount points from your docker-compose.yml
+# We use leading slash / to anchor them to the root deploy folder specifically
+/deploy/clickhouse_data/
+/deploy/kafka_data/
+/deploy/zookeeper_data/
+/deploy/redis_data/
+/deploy/spark_data/
+
+# General docker mounts if you move things around
+**/*_data/
+
+# ==========================================
+#  Spark & Java (Recursive)
+# ==========================================
+# Checkpoints can be created inside spark_jobs/ or root
+**/checkpoint/
+**/spark-warehouse/
+**/metastore_db/
+**/derby.log
+
+# Compiled Java/Scala classes
+**/*.class
+**/*.jar
+
+# ==========================================
+#  IDEs & Editors
+# ==========================================
+**/.idea/
+**/.vscode/
+**/*.swp
+**/*.swo
+**/.DS_Store
+**/Thumbs.db
+
+# ==========================================
+#  Logs & Testing
+# ==========================================
+**/*.log
+**/logs/
+**/.pytest_cache/
+**/.coverage
+**/htmlcov/

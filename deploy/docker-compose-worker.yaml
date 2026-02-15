@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  spark-worker:
+    image: bitnami/spark:3.5
+    environment:
+      - SPARK_MODE=worker
+      # CONNECTS TO PC 1
+      - SPARK_MASTER_URL=spark://${SPARK_MASTER_HOST}:${SPARK_MASTER_PORT}
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    # Mount code so worker can see the logic
+    volumes:
+      - ../spark_jobs:/app/spark_jobs 
+    extra_hosts:
+      - "spark-master:${SPARK_MASTER_HOST}" # Maps hostname to PC 1 IP

@@ -1,0 +1,49 @@
+# ==============================================================================
+# Apache Spark Streaming Application Image
+# ==============================================================================
+# Purpose:
+#   Custom Spark image with Python dependencies for streaming to HBase + ClickHouse
+# 
+# Base Image:
+#   apache/spark:3.5.0 - Official Spark image with Scala, Java, and Spark runtime
+# 
+# Custom Additions:
+#   - happybase: Python HBase client library for direct writes to HBase cluster
+#   - Environment variable configuration for PySpark Python 3 execution
+
+FROM apache/spark:3.5.0
+
+# Switch to root to install dependencies
+USER root
+
+# ==============================================================================
+# Install Python Dependencies
+# ==============================================================================
+# happybase: Pure Python client for HBase REST interface
+#   - Enables the stream processor to write events to HBase
+#   - Used in spark_jobs/stream_processor.py (line 75+)
+# --no-cache-dir: Reduce final image size by not caching pip package lists
+RUN pip3 install --no-cache-dir happybase
+
+# ==============================================================================
+# Configure Spark Environment
+# ==============================================================================
+# SPARK_HOME: Root directory of Spark installation
+#   - Default: /opt/spark (set in base image)
+#   - Added to PATH so spark-submit is available globally
+ENV SPARK_HOME=/opt/spark
+ENV PATH="/opt/spark/bin:/opt/spark/sbin:${PATH}"
+
+# ==============================================================================
+# Configure PySpark Python Runtime
+# ==============================================================================
+# PYSPARK_PYTHON: Python interpreter for Spark executors (worker nodes)
+#   - Must be python3 for PySpark DataFrame API and modern syntax (f-strings)
+# PYSPARK_DRIVER_PYTHON: Python interpreter for Spark driver (main process)
+#   - Both must match to avoid serialization issues between driver and executors
+ENV PYSPARK_PYTHON=python3
+ENV PYSPARK_DRIVER_PYTHON=python3
+
+# Return to non-root 'spark' user for security
+# (default user in apache/spark image)
+USER spark

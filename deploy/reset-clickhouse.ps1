@@ -1,24 +1,18 @@
-# PowerShell script to reset ClickHouse data and reinitialize tables
-# Use this if ClickHouse is in an inconsistent state
+<# Reset ClickHouse data and reinitialize #>
 
-Write-Host "WARNING: This script will delete all ClickHouse data!" -ForegroundColor Red
-Write-Host "Press Ctrl+C to cancel, or wait 10 seconds to continue..." -ForegroundColor Yellow
-
+Write-Host "WARNING: This will delete all ClickHouse data!" -ForegroundColor Red
+Write-Host "Waiting 10 seconds..." -ForegroundColor Yellow
 Start-Sleep -Seconds 10
 
-Write-Host "Stopping Docker containers..." -ForegroundColor Cyan
+Write-Host "Stopping..." -ForegroundColor Cyan
 docker-compose down
 
-Write-Host "Removing ClickHouse data volume..." -ForegroundColor Cyan
+Write-Host "Removing volume..." -ForegroundColor Cyan
 docker volume rm clickhouse_data -f
 
-Write-Host "Starting Docker containers..." -ForegroundColor Cyan
+Write-Host "Starting..." -ForegroundColor Cyan
 docker-compose up -d
 
-Write-Host "Waiting for services to be ready..." -ForegroundColor Yellow
 Start-Sleep -Seconds 15
 
-Write-Host "Running ClickHouse initialization..." -ForegroundColor Cyan
-& .\init-clickhouse.ps1
-
-Write-Host "ClickHouse reset complete!" -ForegroundColor Green
+& .\init-clickhouse.ps1Write-Host "Reset complete" -ForegroundColor Green

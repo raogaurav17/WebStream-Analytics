@@ -1,185 +1,117 @@
-"""
-Web Traffic Analysis - Spark Structured Streaming Application
+"""E-Commerce Streaming Analytics - Kafka to ClickHouse via Spark."""
 
-This application implements a dual-sink streaming pipeline that:
-1. Reads events from Kafka in real-time
-2. Parses and validates the Avro/JSON schema
-3. Writes raw events to HBase for low-latency queries
-4. Writes aggregated data to ClickHouse for analytical queries
-5. Maintains fault tolerance with checkpointing
-
-The pipeline handles micro-batches and provides exactly-once semantics through
-Spark's checkpointing mechanism and idempotent writes to both sinks.
-
-Prerequisites:
-    - Spark 3.5.0+ with Scala 2.12
-    - Kafka broker at kafka:29092
-    - HBase instance at hbase:9090
-    - ClickHouse instance at clickhouse:8123
-    - Environment variables: CLICKHOUSE_USER, CLICKHOUSE_PASSWORD
-    - ClickHouse JDBC driver (clickhouse-jdbc-0.6.4-shaded.jar)
-
-Author: Analytics Team
-License: Internal Use Only
-"""
-
+from pyspark import SparkConf
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
 
 import os
+import urllib.request
+import urllib.parse
+import json
 
-# Retrieve credentials from environment for secure ClickHouse connection
-user = os.getenv("CLICKHOUSE_USER")
-password = os.getenv("CLICKHOUSE_PASSWORD")
+CLICKHOUSE_USER     = os.getenv("CLICKHOUSE_USER", "default")
+CLICKHOUSE_PASSWORD = os.getenv("CLICKHOUSE_PASSWORD", "clickhouse")
+CLICKHOUSE_HOST     = "clickhouse"
+CLICKHOUSE_PORT     = "8123"
+CLICKHOUSE_DB       = "default"
+CLICKHOUSE_TABLE    = "events"
 
-# Initialize Spark Session with optimized configuration for streaming
+conf = SparkConf()
+conf.set("spark.sql.streaming.checkpointLocation", "/opt/spark-apps/checkpoint_v2")
+
 spark = SparkSession.builder \
     .appName("ECommerceEventProcessor") \
-    .config("spark.sql.streaming.checkpointLocation", "/opt/spark-apps/checkpoint") \
+    .config(conf=conf) \
     .getOrCreate()
 
-# Define the schema for incoming events from Kafka
-# Ensures type safety and early error detection during parsing
+spark.sparkContext.setLogLevel("INFO")
+
 event_schema = StructType([
-    StructField("event_id", StringType(), True),        # Unique identifier for the event
-    StructField("event_type", StringType(), True),      # Type of event (click, purchase, etc.)
-    StructField("user_id", StringType(), True),         # User who performed the action
-    StructField("product_id", StringType(), True),      # Product involved in the event
-    StructField("price", DoubleType(), True),           # Price of the product
-    StructField("timestamp", TimestampType(), True),    # Timestamp of the event
-    StructField("category", StringType(), True),        # Product category
-    StructField("ip_address", StringType(), True),      # Client IP address
+    StructField("event_id",   StringType(),    True),
+    StructField("event_type", StringType(),    True),
+    StructField("user_id",    StringType(),    True),
+    StructField("product_id", StringType(),    True),
+    StructField("price",      DoubleType(),    True),
+    StructField("timestamp",  TimestampType(), True),
+    StructField("category",   StringType(),    True),
+    StructField("ip_address", StringType(),    True),
 ])
 
-# Read streaming data from Kafka topic
-# Using external bootstrap server with earliest offsets for replay capability
+print("Connecting to Kafka at kafka:29092...")
 kafka_df = spark \
     .readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "kafka:29092") \
     .option("subscribe", "events") \
     .option("startingOffsets", "earliest") \
+    .option("failOnDataLoss", "false") \
+    .option("maxOffsetsFetchPerPartition", 10000) \
     .load()
 
-# Parse Kafka message (JSON string) into structured columns
-# The 'value' field contains the serialized JSON payload
-parsed_df = kafka_df \
+print("Parsing event schema...")
+
+enriched_df = kafka_df \
     .select(from_json(col("value").cast("string"), event_schema).alias("data")) \
     .select("data.*")
 
-# Dual-sink write function executed for each micro-batch
-# Implements the core business logic: writing to both HBase and ClickHouse
-def write_to_sinks(df, batch_id):
-    """
-    Process and write a micro-batch to multiple sinks.
-    
-    Args:
-        df: DataFrame containing the current micro-batch
-        batch_id: Unique identifier for this batch
-    
-    Writes to:
-        1. HBase table 'events' - for low-latency operational queries
-        2. ClickHouse table 'events' - for analytical/OLAP queries
-    """
-    print(f"Processing micro-batch {batch_id}")
-    
-    # Skip empty batches to avoid unnecessary writes
-    if df.count() == 0:
-        print(f"Batch {batch_id} is empty, skipping write")
+def write_partition_to_clickhouse(rows):
+    """Write rows to ClickHouse via HTTP API."""
+    rows = list(rows)
+    if not rows:
         return
 
-    # ==== SINK 1: HBase (operational store for low-latency access) ====
-    def hbase_write(partition):
-        """
-        Write events to HBase using happybase library.
-        Runs in parallel on executor nodes, one partition per executor.
-        
-        HBase schema:
-            Row Key: event_id
-            Column Family: 'cf'
-            Columns: event_type, user_id, product_id, price, timestamp, category, ip
-        """
-        try:
-            import happybase
-            conn = happybase.Connection('hbase', 9090)
-            table = conn.table('events')
-            
-            # Write each row from the partition to HBase
-            for row in partition:
-                key = row['event_id'].encode()
-                data = {
-                    b'cf:event_type':   str(row['event_type']).encode(),
-                    b'cf:user_id':      str(row['user_id']).encode(),
-                    b'cf:product_id':   str(row['product_id']).encode(),
-                    b'cf:price':        str(row['price']).encode(),
-                    b'cf:timestamp':    str(row['timestamp']).encode(),
-                    b'cf:category':     str(row['category']).encode(),
-                    b'cf:ip':           str(row['ip_address']).encode(),
-                }
-                table.put(key, data)
-            conn.close()
-            print(f"Successfully wrote partition to HBase for batch {batch_id}")
-        except Exception as e:
-            print(f"ERROR writing to HBase: {e}")
-            raise
+    lines = []
+    for row in rows:
+        record = {
+            "event_id":   row.event_id   or "",
+            "event_type": row.event_type or "",
+            "user_id":    row.user_id    or "",
+            "product_id": row.product_id or "",
+            "price":      row.price      if row.price is not None else 0.0,
+            "timestamp":  row.timestamp.strftime("%Y-%m-%d %H:%M:%S") if row.timestamp else "1970-01-01 00:00:00",
+            "category":   row.category   or "",
+            "ip_address": row.ip_address or "",
+        }
+        lines.append(json.dumps(record))
 
-    # Attempt HBase write with failure handling
+    payload = "\n".join(lines).encode("utf-8")
+
+    query = f"INSERT INTO {CLICKHOUSE_DB}.{CLICKHOUSE_TABLE} FORMAT JSONEachRow"
+    params = urllib.parse.urlencode({"query": query})
+    url = f"http://{CLICKHOUSE_HOST}:{CLICKHOUSE_PORT}/?{params}"
+
+    req = urllib.request.Request(url, data=payload, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("X-ClickHouse-User", CLICKHOUSE_USER)
+    req.add_header("X-ClickHouse-Key", CLICKHOUSE_PASSWORD)
+
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        resp.read()
+
+def write_to_sinks(batch_df, batch_id):
+    """Process micro-batch and write to ClickHouse."""
+
+    if batch_df.count() == 0:
+        return
+
+    row_count = batch_df.count()
     try:
-        df.foreachPartition(hbase_write)
+        batch_df.foreachPartition(write_partition_to_clickhouse)
+        print(f"Batch {batch_id}: {row_count} rows written")
     except Exception as e:
-        print(f"WARN: HBase write failed for batch {batch_id}: {e}")
+        print(f"Write failed: {str(e)[:500]}")
 
-    # ==== SINK 2: ClickHouse (analytical store for OLAP queries) ====
-    try:
-        df.write \
-            .format("jdbc") \
-            .option("url", "jdbc:clickhouse://clickhouse:8123/default") \
-            .option("dbtable", "events") \
-            .option("user", user) \
-            .option("password", password) \
-            .option("driver", "com.clickhouse.jdbc.ClickHouseDriver") \
-            .mode("append") \
-            .save()
-        print(f"Successfully wrote batch {batch_id} to ClickHouse")
-    except Exception as e:
-        print(f"ERROR writing to ClickHouse: {e}")
-        print(f"Retrying with ignore mode to handle duplicates...")
-        try:
-            # Retry with 'ignore' mode to gracefully handle duplicate key errors
-            df.write \
-                .format("jdbc") \
-                .option("url", "jdbc:clickhouse://clickhouse:8123/default") \
-                .option("dbtable", "events") \
-                .option("user", user) \
-                .option("password", password) \
-                .option("driver", "com.clickhouse.jdbc.ClickHouseDriver") \
-                .mode("ignore") \
-                .save()
-            print(f"Successfully wrote batch {batch_id} to ClickHouse (with retry)")
-        except Exception as e2:
-            print(f"ERROR: Final ClickHouse write failed for batch {batch_id}: {e2}")
-            raise
+print("\nStarting streaming pipeline...")
+print(f"Kafka topic: events") 
+print(f"ClickHouse: http://{CLICKHOUSE_HOST}:{CLICKHOUSE_PORT}")
 
-# ==== Stream Initialization and Processing ====
-# foreachBatch sink enables:
-#   - Custom per-batch logic (write_to_sinks function)
-#   - Exactly-once processing semantics via checkpointing
-#   - Fault tolerance: if app crashes, checkpoint recovers missed batches
-# 
-# Trigger model:
-#   - processingTime="10 seconds": Process available data every 10 seconds
-#   - If no data arrives, batches are skipped (no idle writes)
-query = parsed_df.writeStream \
+query = enriched_df.writeStream \
     .foreachBatch(write_to_sinks) \
-    .option("checkpointLocation", "./checkpoint") \
+    .option("checkpointLocation", "/opt/spark-apps/checkpoint_v2") \
     .trigger(processingTime="10 seconds") \
     .start()
 
-print("--- Stream Started (Targets: ClickHouse + HBase) ---")
-print("Pipeline running with 10-second micro-batch trigger")
-print("Checkpoint recovery enabled for fault tolerance")
+print("Streaming pipeline started")
 
-# Block execution until stream terminates (error, timeout, or manual stop)
-# This call never returns unless the stream stops
 query.awaitTermination()

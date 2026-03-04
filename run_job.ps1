@@ -1,37 +1,9 @@
-<#
-.SYNOPSIS
-    Orchestrates the entire Web Traffic Analysis pipeline.
+<# Web Traffic Analysis - Spark streaming pipeline orchestration #>
 
-.DESCRIPTION
-    This script is the main entry point for the Web Traffic Analysis system. It:
-    - Loads configuration from .env file
-    - Initializes ClickHouse database and tables
-    - Submits the Spark Streaming job to the cluster
-    - Monitors the job execution
-
-.PREREQUISITES
-    - Docker and Docker Compose running with all services up
-    - .env file in deploy/ directory with credentials
-    - Spark cluster accessible at spark-master:7077
-    - ClickHouse, Kafka, and other services initialized
-
-.EXAMPLE
-    .\run_job.ps1
-
-.NOTES
-    The script requires administrative privileges for Docker access.
-#>
-
-Write-Host "================================" -ForegroundColor Cyan
-Write-Host "Web Traffic Analysis - Spark Job" -ForegroundColor Cyan
-Write-Host "================================" -ForegroundColor Cyan
-Write-Host ""
-
-# Navigate to deploy directory for accessing infrastructure scripts and .env file
+Write-Host "Web Traffic Analysis Pipeline" -ForegroundColor Cyan
 Push-Location $PSScriptRoot\deploy
 
-# Load configuration from .env file into environment variables
-Write-Host "Loading environment variables from .env..." -ForegroundColor Yellow
+Write-Host "Loading .env..." -ForegroundColor Yellow
 if (Test-Path ".env") {
     Get-Content .env | ForEach-Object {
         if ($_ -match '^\s*([^#=]\S*?)\s*=(.*)$') {
@@ -40,12 +12,8 @@ if (Test-Path ".env") {
             [System.Environment]::SetEnvironmentVariable($name, $value)
         }
     }
-} else {
-    Write-Host "WARNING: .env file not found in deploy directory" -ForegroundColor Yellow
 }
 
-# Initialize ClickHouse database schema and tables before starting Spark job
-Write-Host ""
 Write-Host "Initializing ClickHouse..." -ForegroundColor Cyan
 if (Test-Path "init-clickhouse.ps1") {
     & .\init-clickhouse.ps1
@@ -54,35 +22,35 @@ if (Test-Path "init-clickhouse.ps1") {
         Pop-Location
         exit 1
     }
-} else {
-    Write-Host "WARNING: init-clickhouse.ps1 not found, skipping ClickHouse initialization" -ForegroundColor Yellow
 }
 
 Pop-Location
 
-Write-Host ""
-Write-Host "Submitting Hybrid Spark Job to Cluster..." -ForegroundColor Cyan
+Write-Host "Starting Event Producer..." -ForegroundColor Cyan
+docker exec -d spark-master python3 /opt/spark-apps/log_producer.py --rate 5 --users 100
 
-# Configure Spark with ClickHouse JDBC driver and fix Ivy cache settings
-$jar = "clickhouse-jdbc-0.6.4-shaded.jar"
+Write-Host "Stopping any previous Spark jobs..." -ForegroundColor Yellow
+docker exec spark-master bash -c "pkill -f stream_processor.py; sleep 2" 2>$null
+Write-Host "Done" -ForegroundColor Green
+
+Write-Host "Submitting Spark Job..." -ForegroundColor Cyan
+
 $ivyFix = "-Divy.home=/opt/spark/.ivy -Divy.cache.dir=/opt/spark/.ivy/cache"
+$javaOpts = "spark.driver.extraJavaOptions=$ivyFix"
+$packages = "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0"
 
-# Submit the Spark Streaming job to the standalone cluster
-docker exec spark-master `
-    /opt/spark/bin/spark-submit `
-    --master spark://spark-master:7077 `
+docker exec spark-master /opt/spark/bin/spark-submit `
+    --master "local[*]" `
     --deploy-mode client `
-    --conf "spark.driver.extraJavaOptions=$ivyFix" `
-    --conf "spark.executor.extraJavaOptions=$ivyFix" `
-    --jars /opt/spark-apps/$jar `
-    --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0 `
-    /opt/spark-apps/stream_processor.py
+    --conf $javaOpts `
+    --packages $packages `
+    --jars /opt/spark-apps/clickhouse-jdbc-0.6.4-shaded.jar `
+    /opt/spark-apps/stream_processor.py 2>&1 | Tee-Object -FilePath spark_job.log
 
 if ($LASTEXITCODE -eq 0) {
-    Write-Host ""
     Write-Host "Spark job completed successfully" -ForegroundColor Green
-} else {
-    Write-Host ""
+}
+else {
     Write-Host "ERROR: Spark job failed with exit code $LASTEXITCODE" -ForegroundColor Red
 }
 

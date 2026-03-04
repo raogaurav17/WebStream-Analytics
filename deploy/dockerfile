@@ -1,49 +1,51 @@
 # ==============================================================================
 # Apache Spark Streaming Application Image
 # ==============================================================================
-# Purpose:
-#   Custom Spark image with Python dependencies for streaming to HBase + ClickHouse
-# 
-# Base Image:
-#   apache/spark:3.5.0 - Official Spark image with Scala, Java, and Spark runtime
-# 
-# Custom Additions:
-#   - happybase: Python HBase client library for direct writes to HBase cluster
-#   - Environment variable configuration for PySpark Python 3 execution
+# Base:    apache/spark:3.5.0
+# Adds:    Python3, pip, requests library, PySpark environment config
+# ==============================================================================
 
 FROM apache/spark:3.5.0
 
-# Switch to root to install dependencies
 USER root
 
 # ==============================================================================
-# Install Python Dependencies
+# Install Python dependencies
 # ==============================================================================
-# happybase: Pure Python client for HBase REST interface
-#   - Enables the stream processor to write events to HBase
-#   - Used in spark_jobs/stream_processor.py (line 75+)
-# --no-cache-dir: Reduce final image size by not caching pip package lists
-RUN pip3 install --no-cache-dir happybase
+# requests: Used by stream_processor.py to write to ClickHouse HTTP API
+# (urllib is stdlib but requests gives cleaner error handling if needed later)
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+    python3-pip \
+    curl \
+    netcat-openbsd && \
+    pip3 install --no-cache-dir requests && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # ==============================================================================
-# Configure Spark Environment
+# Spark environment
 # ==============================================================================
-# SPARK_HOME: Root directory of Spark installation
-#   - Default: /opt/spark (set in base image)
-#   - Added to PATH so spark-submit is available globally
+# SPARK_HOME and PATH are already set in the base image but re-declared
+# here for clarity and to ensure they survive any ENV layering.
 ENV SPARK_HOME=/opt/spark
 ENV PATH="/opt/spark/bin:/opt/spark/sbin:${PATH}"
 
-# ==============================================================================
-# Configure PySpark Python Runtime
-# ==============================================================================
-# PYSPARK_PYTHON: Python interpreter for Spark executors (worker nodes)
-#   - Must be python3 for PySpark DataFrame API and modern syntax (f-strings)
-# PYSPARK_DRIVER_PYTHON: Python interpreter for Spark driver (main process)
-#   - Both must match to avoid serialization issues between driver and executors
+# PySpark Python runtime - driver and executor must match to avoid
+# serialization errors when shipping closures across the cluster.
 ENV PYSPARK_PYTHON=python3
 ENV PYSPARK_DRIVER_PYTHON=python3
 
-# Return to non-root 'spark' user for security
-# (default user in apache/spark image)
+# Increase default network timeout to handle slow jar downloads at startup
+ENV SPARK_SUBMIT_OPTS="-Dnetworkaddress.cache.ttl=60"
+
+# ==============================================================================
+# Pre-fetch the ClickHouse shaded JAR into the image
+# so spark-submit doesn't need --jars at runtime and avoids download delays.
+# The jar is copied from the mounted spark_jobs volume path at build time.
+# If the jar is not present, the COPY will fail fast and clearly.
+# ==============================================================================
+COPY spark_jobs/clickhouse-jdbc-0.6.4-shaded.jar /opt/spark/jars/
+
+# Return to non-root spark user for security
 USER spark

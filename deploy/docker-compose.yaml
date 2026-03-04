@@ -2,223 +2,151 @@
 # Web Traffic Analysis Pipeline - Infrastructure Orchestration
 # ==============================================================================
 #
-# Purpose:
-#   Defines and manages all containerized services for the event streaming pipeline:
-#   - Kafka: Event broker and source
-#   - ClickHouse: Analytical database (OLAP)
-#   - HBase: Operational database (low-latency key-value store)
-#   - Spark: Distributed streaming processor
-#   - Zookeeper: Distributed coordination (Kafka/HBase)
+# Services:
+#   - Zookeeper: Kafka coordination
+#   - Kafka:     Event broker (source)
+#   - ClickHouse: OLAP analytical database (sink)
+#   - Spark Master: Distributed streaming processor
 #
-# Network Architecture:
-#   All services communicate on custom bridge network 'analytics-net'
-#   This isolates the pipeline from other Docker workloads
-#
-# Volumes:
-#   - clickhouse_data: Persistent ClickHouse tables and data files
-#   - hbase_data: Persistent HBase HDFS storage
-#
-# Setup:
-#   1. Create .env file with: CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=<password>
-#   2. Run: docker-compose up
-#   3. Services startup order is handled via 'depends_on' directives
-#
+# Usage:
+#   1. Create deploy/.env with CLICKHOUSE_USER and CLICKHOUSE_PASSWORD
+#   2. Run: docker-compose up -d
 # ==============================================================================
 
 version: '3.8'
 
 services:
 
-  # ==============================================================================
-  # COORDINATION & MESSAGING LAYER
-  # ==============================================================================
-
-  # Zookeeper: Distributed coordination service
-  # - Used by Kafka for broker coordination and topic metadata
-  # - Used by HBase for region server discovery and configuration
-  # - Single instance is sufficient for development/testing
+  # ----------------------------------------------------------------------------
+  # Zookeeper - Kafka coordination
+  # ----------------------------------------------------------------------------
   zookeeper:
     image: wurstmeister/zookeeper:latest
+    container_name: zookeeper
     ports:
-      - "2181:2181"  # Zookeeper client port
+      - "2181:2181"
     networks:
       - analytics-net
-    # No volumes needed; state is maintained by Kafka and HBase
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Kafka: Distributed event streaming platform
-  # - Receives events from producer (log_producer.py)
-  # - Serves as source for Spark streaming application
-  # - Provides fault tolerance via replication and persistence
+  # ----------------------------------------------------------------------------
+  # Kafka - Event streaming broker
+  #   INTERNAL://kafka:29092  -> container-to-container (Spark)
+  #   EXTERNAL://localhost:9092 -> host machine (producer scripts)
+  # ----------------------------------------------------------------------------
   kafka:
     image: wurstmeister/kafka:latest
+    container_name: kafka
     ports:
-      - "9092:9092"  # External listener (host machine)
+      - "9092:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      
-      # Listeners: INTERNAL for container-to-container, EXTERNAL for host access
-      # - INTERNAL://kafka:29092 used by Spark streaming app
-      # - EXTERNAL://0.0.0.0:9092 used by host producer scripts
       KAFKA_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://0.0.0.0:9092
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      
-      # Auto-create 'events' topic (1 partition, 1 replication factor)
-      # For high-volume or multi-consumer scenarios, increase partitions
       KAFKA_CREATE_TOPICS: "events:1:1"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    
+      # Retain messages for 2 hours (enough for dev/test replay)
+      KAFKA_LOG_RETENTION_HOURS: 2
+      KAFKA_LOG_SEGMENT_BYTES: 536870912  # 512MB max segment size
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # Docker daemon socket
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     networks:
       - analytics-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "kafka:29092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
 
-  # ==============================================================================
-  # DATA STORE LAYER
-  # ==============================================================================
-
-  # ClickHouse: Analytical OLAP database
-  # - Optimized for compressed column storage and fast analytical queries
-  # - Sink 1: Spark streaming writes events via JDBC driver
-  # - Use cases: Aggregations, reporting, time-series analysis
-  # - Table: 'events' in database 'default' (created by init-clickhouse.ps1)
+  # ----------------------------------------------------------------------------
+  # ClickHouse - OLAP analytical database
+  #   Port 8123: HTTP interface (JDBC, REST API)
+  #   Port 9000: Native TCP protocol
+  #
+  # NOTE: CLICKHOUSE_DB in environment only sets the default DB shown in the
+  # client - tables are created in 'default' database by init-clickhouse.ps1.
+  # The stream_processor.py connects to 'default' via JDBC.
+  # ----------------------------------------------------------------------------
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:24.3   # Pin to stable LTS version
+    container_name: clickhouse
     ports:
-      - "8123:8123"   # HTTP interface (REST API, interactive SQL)
-      - "9000:9000"   # Native TCP protocol (used by JDBC driver)
+      - "8123:8123"
+      - "9000:9000"
     environment:
-      CLICKHOUSE_DB: web_analytics       # Primary database
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER}        # Loaded from .env
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1   # Enable user management
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     ulimits:
       nofile:
-        soft: 262144  # Allow ClickHouse to open many files (columnar data)
+        soft: 262144
         hard: 262144
     volumes:
-      # Persistent storage for tables and metadata
       - clickhouse_data:/var/lib/clickhouse
-      
-      # SQL initialization script
-      # runs once on first container startup (via /docker-entrypoint-initdb.d)
-      # NOTE: This approach is being replaced by PowerShell orchestration
       - ./init-ch.sql:/docker-entrypoint-initdb.d/01-init.sql
     networks:
       - analytics-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # HBase: Distributed NoSQL database (operational store)
-  # - Optimized for random reads/writes on large datasets
-  # - Sink 2: Spark streaming writes events for low-latency access
-  # - Row format: row_key=event_id, columns=event_type,user_id,product_id,price,timestamp,category,ip
-  # - Table: 'events' created manually (see stream_processor.py)
-  # - Web UI: http://localhost:16010
-  hbase:
-    image: harisekhon/hbase:latest   # Popular pre-configured HBase image
-    container_name: hbase
-    ports:
-      - "16010:16010"   # HBase Master Web UI (admin interface)
-      - "9090:9090"     # Thrift server port (used by happybase Python client)
-    environment:
-      HBASE_ROOTDIR: /hbase
-      HBASE_ZOOKEEPER_QUORUM: zookeeper  # Use external Zookeeper for coordination
-      HBASE_MANAGES_ZK: false     # Don't auto-start Zookeeper (using shared instance)
-    volumes:
-      - hbase_data:/hbase    # Persistent HDFS storage
-    depends_on:
-      - zookeeper
-    networks:
-      - analytics-net
-
-  # Redis: In-memory cache (optional, reserved for future extensions)
-  # - Could be used for: session caching, rate-limiting, intermediate results
-  # - Currently unused but included for feature completeness
-  redis:
-    image: redis:alpine
-    ports:
-      - "6379:6379"  # Redis client port
-    networks:
-      - analytics-net
-    # No volumes: Redis is ephemeral cache (ok if container restarts)
-
-  # ==============================================================================
-  # SPARK CLUSTER (PROCESSING LAYER)
-  # ==============================================================================
-  # Architecture:
-  #   - spark-master: Driver node (orchestrates job execution)
-  #   - spark-worker: Executor node (processes data partitions)
-  #   - Cluster mode: Manages distributed task execution across the worker
-  #   - Communication: spark://spark-master:7077 (cluster connection address)
-
-  # Spark Master: Job orchestrator and resource manager
-  # - Receives spark-submit jobs from host (run_job.ps1)
-  # - Coordinates task scheduling across worker nodes
-  # - Maintains RDD/DataFrame graphs and metadata
-  # - Web UI: http://localhost:8081 (monitors job progress)
+  # ----------------------------------------------------------------------------
+  # Spark Master - Job orchestrator (local mode)
+  #   Web UI:  http://localhost:8081
+  #   Submit:  spark://localhost:7077
+  #
+  # spark_jobs/ is mounted at /opt/spark-apps inside the container.
+  # The clickhouse-jdbc-0.6.4-shaded.jar must be present in spark_jobs/.
+  # ----------------------------------------------------------------------------
   spark-master:
-    image: apache/spark:3.5.0         # Base image
-    build: .                           # Build custom image (adds happybase)
+    image: apache/spark:3.5.0
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
     container_name: spark-master
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     environment:
-      # Spark runtime configuration
-      - SPARK_NO_DAEMONIZE=true      # Keep process in foreground (Docker best practice)
-      - SPARK_MASTER_HOST=spark-master  # Hostname for worker/client discovery
-      - SPARK_MASTER_WEBUI_PORT=8080    # Web UI port within container
-      - SPARK_PUBLIC_DNS=localhost      # DNS hint for external communication
-      
-      # ClickHouse credentials (passed to streaming job)
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER}        # From .env
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_WEBUI_PORT: 8080
+      SPARK_PUBLIC_DNS: localhost
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
     ports:
-      - "8081:8080"   # Web UI: http://localhost:8081
-      - "7077:7077"   # Cluster submission port: spark://localhost:7077
+      - "8081:8080"   # Spark Web UI
+      - "7077:7077"   # Cluster submission
     volumes:
-      # Spark job scripts (stream_processor.py, log_producer.py)
       - ../spark_jobs:/opt/spark-apps
-    networks:
-      - analytics-net
-
-  # Spark Worker: Distributed executor (processes RDD/DataFrame partitions)
-  # - Executes tasks assigned by spark-master
-  # - Manages executors and shuffle operations
-  # - Resources: 2 cores, 1GB memory (configurable for larger workloads)
-  spark-worker:
-    image: apache/spark:3.5.0
-    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
-    environment:
-      # Worker resource allocation
-      - SPARK_WORKER_CORES=2         # Cores available for executor tasks
-      - SPARK_WORKER_MEMORY=1g       # Total memory for executor JVMs
-      - SPARK_EXECUTOR_MEMORY=1g     # Memory per executor instance
-      - SPARK_NO_DAEMONIZE=true      # Keep in foreground
     depends_on:
-      - spark-master  # Wait for master to start before starting worker
-    volumes:
-      # Same job directory as master (for code consistency)
-      - ../spark_jobs:/opt/spark-apps
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
     networks:
       - analytics-net
-    # Note: add more spark-worker instances by duplicating this service
-    # with different hostnames/ports for larger clusters
+    restart: unless-stopped
 
-  # ==============================================================================
-  # NETWORK & STORAGE CONFIGURATION
-  # ==============================================================================
-
+# ------------------------------------------------------------------------------
+# Networks & Volumes
+# ------------------------------------------------------------------------------
 networks:
-  # analytics-net: Custom bridge network isolating this pipeline
-  # All services communicate via service names (e.g., kafka:29092)
   analytics-net:
     driver: bridge
 
 volumes:
-  # Persistent storage for HBase HDFS
-  hbase_data:
-  
-  # Persistent storage for ClickHouse tables
   clickhouse_data:

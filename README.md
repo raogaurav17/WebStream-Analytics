@@ -140,11 +140,6 @@ python producer/producer.py --rate 5 --users 200 --broker localhost:9092
 
 <br/>
 
-<!-- SCREENSHOT: Producer terminal output showing funnel stats and spike tags -->
-<!-- Replace with: ![Producer Output](docs/screenshots/producer-terminal.png) -->
-
-> 📸 _Add screenshot: Producer terminal — event counts, CVR, spike indicators (🚀 VIRAL BURST / ⚡ FLASH SALE)_
-
 ---
 
 ### Kafka

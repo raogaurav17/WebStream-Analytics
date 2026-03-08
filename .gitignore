@@ -73,3 +73,5 @@ build/
 **/.pytest_cache/
 **/.coverage
 **/htmlcov/
+
+node_modules/

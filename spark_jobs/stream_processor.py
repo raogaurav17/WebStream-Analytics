@@ -25,7 +25,7 @@ spark = SparkSession.builder \
     .config(conf=conf) \
     .getOrCreate()
 
-spark.sparkContext.setLogLevel("INFO")
+spark.sparkContext.setLogLevel("ERROR")
 
 event_schema = StructType([
     StructField("event_id",   StringType(),    True),

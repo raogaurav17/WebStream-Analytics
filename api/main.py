@@ -17,13 +17,13 @@ GET /metrics/revenue                revenue over time + total
 GET /metrics/realtime               last-60-seconds rolling window (for live dashboards)
 """
 
-from fastapi import FastAPI, Query, HTTPException, Depends
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from typing import Literal, Optional
 import clickhouse_connect
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
@@ -40,16 +40,18 @@ CH_DB       = os.getenv("CH_DB",       "default")
 TABLE       = f"{CH_DB}.events"
 
 # ---------------------------------------------------------------------------
-# ClickHouse client (shared, thread-safe)
+# ClickHouse async client (single shared instance — safe for async/await)
 # ---------------------------------------------------------------------------
 
-_client: clickhouse_connect.driver.Client | None = None
+_async_client: clickhouse_connect.driver.AsyncClient | None = None
 
-def get_client() -> clickhouse_connect.driver.Client:
-    global _client
-    if _client is None:
+
+async def get_client() -> clickhouse_connect.driver.AsyncClient:
+    global _async_client
+    if _async_client is None:
         raise HTTPException(status_code=503, detail="ClickHouse client not initialised")
-    return _client
+    return _async_client
+
 
 # ---------------------------------------------------------------------------
 # App lifecycle
@@ -57,21 +59,23 @@ def get_client() -> clickhouse_connect.driver.Client:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _client
-    _client = clickhouse_connect.get_client(
+    global _async_client
+    _async_client = await clickhouse_connect.get_async_client(
         host=CH_HOST, port=CH_PORT,
         username=CH_USER, password=CH_PASSWORD,
         database=CH_DB,
     )
-    print(f"✓ Connected to ClickHouse at {CH_HOST}:{CH_PORT}")
+    await _async_client.query("SELECT 1")
+    print(f"✓ Connected to ClickHouse (async) at {CH_HOST}:{CH_PORT}")
     yield
-    _client.close()
-    print("✓ ClickHouse connection closed")
+    await _async_client.close()
+    print("✓ ClickHouse async connection closed")
+
 
 app = FastAPI(
     title="E-Commerce Analytics API",
     description="Real-time analytics over the Kafka→ClickHouse events pipeline",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -90,6 +94,7 @@ def _row_to_dict(result) -> list[dict]:
     """Convert clickhouse_connect QueryResult to list of dicts."""
     return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
+
 def _parse_window(window: str) -> str:
     """Return a ClickHouse interval expression for common window strings."""
     mapping = {
@@ -100,32 +105,37 @@ def _parse_window(window: str) -> str:
         "30d": "now() - INTERVAL 30 DAY",
     }
     if window not in mapping:
-        raise HTTPException(status_code=400, detail=f"window must be one of {list(mapping)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"window must be one of {list(mapping)}",
+        )
     return mapping[window]
+
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
 @app.get("/health", tags=["System"])
-def health(client=Depends(get_client)):
+async def health():
     """Liveness + ClickHouse connectivity check."""
-    result = client.query("SELECT count() FROM default.events")
+    client = await get_client()
+    result = await client.query("SELECT count() FROM default.events")
     total  = result.result_rows[0][0]
     return {"status": "ok", "clickhouse": "connected", "total_events": total}
 
 
 @app.get("/events", tags=["Raw Data"])
-def list_events(
-    limit:      int    = Query(50,  ge=1, le=1000),
-    offset:     int    = Query(0,   ge=0),
-    event_type: Optional[str] = Query(None, description="Filter by event_type"),
-    category:   Optional[str] = Query(None, description="Filter by category"),
-    user_id:    Optional[str] = Query(None, description="Filter by user_id"),
-    window:     str    = Query("24h", description="Time window: 1h/6h/24h/7d/30d"),
-    client=Depends(get_client),
+async def list_events(
+    limit:      int           = Query(50,    ge=1, le=1000),
+    offset:     int           = Query(0,     ge=0),
+    event_type: Optional[str] = Query(None,  description="Filter by event_type"),
+    category:   Optional[str] = Query(None,  description="Filter by category"),
+    user_id:    Optional[str] = Query(None,  description="Filter by user_id"),
+    window:     str           = Query("24h", description="Time window: 1h/6h/24h/7d/30d"),
 ):
     """Paginated raw event log with optional filters."""
+    client = await get_client()
     since  = _parse_window(window)
     wheres = [f"timestamp >= {since}"]
     if event_type:
@@ -144,9 +154,8 @@ def list_events(
         ORDER BY timestamp DESC
         LIMIT {limit} OFFSET {offset}
     """
-    result = client.query(sql)
+    result = await client.query(sql)
     rows   = _row_to_dict(result)
-    # make timestamps JSON-serialisable
     for r in rows:
         if isinstance(r.get("timestamp"), datetime):
             r["timestamp"] = r["timestamp"].isoformat()
@@ -154,12 +163,12 @@ def list_events(
 
 
 @app.get("/metrics/overview", tags=["Metrics"])
-def overview(
+async def overview(
     window: str = Query("24h", description="Time window: 1h/6h/24h/7d/30d"),
-    client=Depends(get_client),
 ):
     """Top-level KPIs: events, CVR, revenue, AOV, unique users."""
-    since = _parse_window(window)
+    client = await get_client()
+    since  = _parse_window(window)
     sql = f"""
         SELECT
             count()                                                          AS total_events,
@@ -178,19 +187,19 @@ def overview(
         FROM {TABLE}
         WHERE timestamp >= {since}
     """
-    result = client.query(sql)
+    result = await client.query(sql)
     row    = dict(zip(result.column_names, result.result_rows[0]))
     return {"window": window, **row}
 
 
 @app.get("/metrics/funnel", tags=["Metrics"])
-def funnel(
+async def funnel(
     window:   str           = Query("24h"),
     category: Optional[str] = Query(None),
-    client=Depends(get_client),
 ):
     """Full funnel with absolute counts and step-over-step drop-off rates."""
-    since  = _parse_window(window)
+    client     = await get_client()
+    since      = _parse_window(window)
     cat_filter = f"AND category = '{category}'" if category else ""
     sql = f"""
         SELECT
@@ -201,7 +210,7 @@ def funnel(
         FROM {TABLE}
         WHERE timestamp >= {since} {cat_filter}
     """
-    result = client.query(sql)
+    result = await client.query(sql)
     r = dict(zip(result.column_names, result.result_rows[0]))
 
     def pct(num, den):
@@ -221,15 +230,15 @@ def funnel(
 
 
 @app.get("/metrics/timeseries", tags=["Metrics"])
-def timeseries(
+async def timeseries(
     window:     str     = Query("24h"),
     bucket:     Literal["minute", "hour", "day"] = Query("hour"),
     event_type: Optional[str] = Query(None),
-    client=Depends(get_client),
 ):
     """Event counts bucketed by time for charting."""
-    since = _parse_window(window)
-    trunc = {"minute": "toStartOfMinute", "hour": "toStartOfHour", "day": "toStartOfDay"}[bucket]
+    client    = await get_client()
+    since     = _parse_window(window)
+    trunc     = {"minute": "toStartOfMinute", "hour": "toStartOfHour", "day": "toStartOfDay"}[bucket]
     et_filter = f"AND event_type = '{event_type}'" if event_type else ""
     sql = f"""
         SELECT
@@ -242,7 +251,7 @@ def timeseries(
         GROUP BY bucket, event_type
         ORDER BY bucket ASC, event_type
     """
-    result = client.query(sql)
+    result = await client.query(sql)
     rows   = _row_to_dict(result)
     for r in rows:
         if isinstance(r.get("bucket"), datetime):
@@ -251,15 +260,15 @@ def timeseries(
 
 
 @app.get("/metrics/top-products", tags=["Metrics"])
-def top_products(
-    window:  str = Query("24h"),
-    by:      Literal["views", "purchases", "revenue"] = Query("revenue"),
-    limit:   int = Query(10, ge=1, le=100),
-    client=Depends(get_client),
+async def top_products(
+    window: str = Query("24h"),
+    by:     Literal["views", "purchases", "revenue"] = Query("revenue"),
+    limit:  int = Query(10, ge=1, le=100),
 ):
     """Top N products ranked by views, purchases, or revenue."""
-    since   = _parse_window(window)
-    order   = {
+    client = await get_client()
+    since  = _parse_window(window)
+    order  = {
         "views":     "views DESC",
         "purchases": "purchases DESC",
         "revenue":   "revenue DESC",
@@ -282,17 +291,17 @@ def top_products(
         ORDER BY {order}
         LIMIT {limit}
     """
-    result = client.query(sql)
+    result = await client.query(sql)
     return {"window": window, "by": by, "data": _row_to_dict(result)}
 
 
 @app.get("/metrics/top-categories", tags=["Metrics"])
-def top_categories(
+async def top_categories(
     window: str = Query("24h"),
-    client=Depends(get_client),
 ):
     """Aggregated funnel stats broken down by product category."""
-    since = _parse_window(window)
+    client = await get_client()
+    since  = _parse_window(window)
     sql = f"""
         SELECT
             category,
@@ -312,20 +321,19 @@ def top_categories(
         GROUP BY category
         ORDER BY revenue DESC
     """
-    result = client.query(sql)
+    result = await client.query(sql)
     return {"window": window, "data": _row_to_dict(result)}
 
 
 @app.get("/metrics/users/{user_id}", tags=["Metrics"])
-def user_journey(
+async def user_journey(
     user_id: str,
     window:  str = Query("7d"),
-    client=Depends(get_client),
 ):
     """Full event history and summary stats for a single user."""
-    since = _parse_window(window)
-    
-    # Summary
+    client = await get_client()
+    since  = _parse_window(window)
+
     summary_sql = f"""
         SELECT
             count()                                  AS total_events,
@@ -341,7 +349,7 @@ def user_journey(
         WHERE user_id = '{user_id}'
           AND timestamp >= {since}
     """
-    summary_result = client.query(summary_sql)
+    summary_result = await client.query(summary_sql)
     summary = dict(zip(summary_result.column_names, summary_result.result_rows[0]))
     for k in ("first_seen", "last_seen"):
         if isinstance(summary.get(k), datetime):
@@ -350,7 +358,6 @@ def user_journey(
     if summary["total_events"] == 0:
         raise HTTPException(status_code=404, detail=f"No events found for user '{user_id}'")
 
-    # Event log
     events_sql = f"""
         SELECT event_id, event_type, product_id, price, timestamp, category
         FROM {TABLE}
@@ -359,7 +366,7 @@ def user_journey(
         ORDER BY timestamp ASC
         LIMIT 200
     """
-    events_result = client.query(events_sql)
+    events_result = await client.query(events_sql)
     events = _row_to_dict(events_result)
     for e in events:
         if isinstance(e.get("timestamp"), datetime):
@@ -369,14 +376,14 @@ def user_journey(
 
 
 @app.get("/metrics/revenue", tags=["Metrics"])
-def revenue(
+async def revenue(
     window: str = Query("24h"),
     bucket: Literal["minute", "hour", "day"] = Query("hour"),
-    client=Depends(get_client),
 ):
     """Revenue over time plus totals and AOV."""
-    since = _parse_window(window)
-    trunc = {"minute": "toStartOfMinute", "hour": "toStartOfHour", "day": "toStartOfDay"}[bucket]
+    client = await get_client()
+    since  = _parse_window(window)
+    trunc  = {"minute": "toStartOfMinute", "hour": "toStartOfHour", "day": "toStartOfDay"}[bucket]
     sql = f"""
         SELECT
             {trunc}(timestamp)  AS bucket,
@@ -389,15 +396,15 @@ def revenue(
         GROUP BY bucket
         ORDER BY bucket ASC
     """
-    result = client.query(sql)
+    result = await client.query(sql)
     rows   = _row_to_dict(result)
     for r in rows:
         if isinstance(r.get("bucket"), datetime):
             r["bucket"] = r["bucket"].isoformat()
 
-    total_revenue  = sum(r["revenue"] for r in rows)
-    total_orders   = sum(r["orders"]  for r in rows)
-    overall_aov    = total_revenue / total_orders if total_orders else 0
+    total_revenue = sum(r["revenue"] for r in rows)
+    total_orders  = sum(r["orders"]  for r in rows)
+    overall_aov   = total_revenue / total_orders if total_orders else 0
 
     return {
         "window":        window,
@@ -410,11 +417,12 @@ def revenue(
 
 
 @app.get("/metrics/realtime", tags=["Metrics"])
-def realtime(client=Depends(get_client)):
+async def realtime():
     """
     Rolling 60-second window for live dashboards.
     Returns per-minute buckets + current events-per-second rate.
     """
+    client = await get_client()
     sql = f"""
         SELECT
             toStartOfMinute(timestamp) AS bucket,
@@ -428,13 +436,12 @@ def realtime(client=Depends(get_client)):
         GROUP BY bucket
         ORDER BY bucket ASC
     """
-    result = client.query(sql)
+    result = await client.query(sql)
     rows   = _row_to_dict(result)
     for r in rows:
         if isinstance(r.get("bucket"), datetime):
             r["bucket"] = r["bucket"].isoformat()
 
-    # events/sec estimate from the most recent full minute
     eps = 0.0
     if rows:
         eps = round(rows[-1]["total"] / 60.0, 2)

@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS default.events
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(timestamp)
-ORDER BY (timestamp, event_id)
+ORDER BY (timestamp, user_id)
 SETTINGS index_granularity = 8192;
 "@
 

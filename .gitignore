@@ -75,3 +75,4 @@ build/
 **/htmlcov/
 
 node_modules/
+*.csv

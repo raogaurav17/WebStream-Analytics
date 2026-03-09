@@ -4,6 +4,16 @@
 
 > A fully containerised, end-to-end streaming platform — from synthetic event generation through Kafka and Spark, into ClickHouse, surfaced via a FastAPI backend and a dark-terminal React dashboard.
 
+![Dashboard Overview](docs/screenshots/overview.png)
+
+---
+
+## Architecture
+
+<p align="center">
+  <img src="docs/screenshots/architecture.png" width="600">
+</p>
+
 ---
 
 ## Tech Stack
@@ -15,7 +25,7 @@
 | Stream Processing | Apache Spark 3.5 Structured Streaming | 10s micro-batch ETL         |
 | Storage           | ClickHouse 24.3 (MergeTree)           | Columnar analytics DB       |
 | Backend API       | FastAPI · clickhouse-connect          | 10 analytics endpoints      |
-| Frontend          | React 18 · Recharts · IBM Plex Mono   | Dark-terminal dashboard     |
+| Frontend          | React 18 · Recharts · IBM Plex Mono   | Dashboard                   |
 | Orchestration     | Docker Compose · PowerShell           | One-command pipeline start  |
 
 ---
@@ -90,7 +100,7 @@ CREATE TABLE IF NOT EXISTS default.events
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(timestamp)
-ORDER BY (timestamp, event_id)
+ORDER BY (timestamp, user_id)
 SETTINGS index_granularity = 8192;
 ```
 

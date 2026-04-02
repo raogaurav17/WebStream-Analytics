@@ -1,0 +1,13 @@
+[project]
+name = "webstream-analytics"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "click>=8.3.1",
+    "clickhouse-connect",
+    "fastapi[standard]>=0.135.2",
+    "kafka-python>=2.3.0",
+    "pyspark",
+]

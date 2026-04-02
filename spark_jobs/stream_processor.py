@@ -77,17 +77,22 @@ def write_partition_to_clickhouse(rows):
 
     payload = "\n".join(lines).encode("utf-8")
 
+    # ClickHouse HTTP API: POST body is the INSERT command + data
     query = f"INSERT INTO {CLICKHOUSE_DB}.{CLICKHOUSE_TABLE} FORMAT JSONEachRow"
-    params = urllib.parse.urlencode({"query": query})
-    url = f"http://{CLICKHOUSE_HOST}:{CLICKHOUSE_PORT}/?{params}"
+    full_payload = (query + "\n" + "\n".join(lines)).encode("utf-8")
+    
+    url = f"http://{CLICKHOUSE_HOST}:{CLICKHOUSE_PORT}/"
 
-    req = urllib.request.Request(url, data=payload, method="POST")
-    req.add_header("Content-Type", "application/json")
+    req = urllib.request.Request(url, data=full_payload, method="POST")
+    req.add_header("Content-Type", "text/plain")
     req.add_header("X-ClickHouse-User", CLICKHOUSE_USER)
     req.add_header("X-ClickHouse-Key", CLICKHOUSE_PASSWORD)
 
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        resp.read()
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp.read()
+    except Exception as e:
+        print(f"ClickHouse write error: {str(e)}")
 
 def write_to_sinks(batch_df, batch_id):
     """Process micro-batch and write to ClickHouse."""
@@ -108,7 +113,7 @@ print(f"ClickHouse: http://{CLICKHOUSE_HOST}:{CLICKHOUSE_PORT}")
 
 query = enriched_df.writeStream \
     .foreachBatch(write_to_sinks) \
-    .option("checkpointLocation", "/opt/spark-apps/checkpoint_v2") \
+    .option("checkpointLocation", "/tmp/spark-checkpoints") \
     .trigger(processingTime="10 seconds") \
     .start()
 

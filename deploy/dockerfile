@@ -40,12 +40,14 @@ ENV PYSPARK_DRIVER_PYTHON=python3
 ENV SPARK_SUBMIT_OPTS="-Dnetworkaddress.cache.ttl=60"
 
 # ==============================================================================
-# Pre-fetch the ClickHouse shaded JAR into the image
+# Pre-fetch the ClickHouse JDBC shaded JAR into the image
 # so spark-submit doesn't need --jars at runtime and avoids download delays.
-# The jar is copied from the mounted spark_jobs volume path at build time.
-# If the jar is not present, the COPY will fail fast and clearly.
+# Downloaded from Maven Central at build time.
 # ==============================================================================
-COPY spark_jobs/clickhouse-jdbc-0.6.4-shaded.jar /opt/spark/jars/
+RUN curl -fsSL \
+    https://repo1.maven.org/maven2/com/clickhouse/clickhouse-jdbc/0.6.4/clickhouse-jdbc-0.6.4-shaded.jar \
+    -o /opt/spark/jars/clickhouse-jdbc-0.6.4-shaded.jar && \
+    ls -lh /opt/spark/jars/clickhouse-jdbc-0.6.4-shaded.jar
 
 # Return to non-root spark user for security
 USER spark

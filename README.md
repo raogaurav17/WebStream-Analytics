@@ -8,6 +8,20 @@
 
 ---
 
+## Table of Contents
+
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Data Model](#data-model)
+- [Components In Depth](#components-in-depth)
+- [Getting Started](#getting-started)
+- [Environment Variables](#environment-variables)
+- [Service Ports](#service-ports)
+- [API Reference](#api-reference)
+- [Dashboard Pages](#dashboard-pages)
+- [Fault Tolerance](#fault-tolerance)
+
 ## Architecture
 
 <p align="center">
@@ -245,8 +259,8 @@ Polling strategy: `/metrics/realtime` is polled every 5 seconds for the live fee
 ### 1 — Clone and configure
 
 ```bash
-git clone <your-repo-url>
-cd web-traffic-analysis
+git clone https://github.com/raogaurav17/WebStream-Analytics
+cd WebStream-Analytics
 ```
 
 Copy and populate credentials:

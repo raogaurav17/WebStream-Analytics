@@ -1,9 +1,9 @@
 [project]
 name = "webstream-analytics"
 version = "0.1.0"
-description = "Add your description here"
+description = "Real-time e-commerce analytics pipeline with Kafka, Spark, ClickHouse, FastAPI, and React"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 dependencies = [
     "click>=8.3.1",
     "clickhouse-connect",

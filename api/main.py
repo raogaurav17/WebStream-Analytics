@@ -95,6 +95,16 @@ def _row_to_dict(result) -> list[dict]:
     return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
 
+def _sql_string(value: str) -> str:
+    """Return a safely quoted ClickHouse string literal."""
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _sql_equals(column: str, value: str) -> str:
+    """Build a simple equality predicate for a trusted column name."""
+    return f"{column} = {_sql_string(value)}"
+
+
 def _parse_window(window: str) -> str:
     """Return a ClickHouse interval expression for common window strings."""
     mapping = {
@@ -139,11 +149,11 @@ async def list_events(
     since  = _parse_window(window)
     wheres = [f"timestamp >= {since}"]
     if event_type:
-        wheres.append(f"event_type = '{event_type}'")
+        wheres.append(_sql_equals("event_type", event_type))
     if category:
-        wheres.append(f"category = '{category}'")
+        wheres.append(_sql_equals("category", category))
     if user_id:
-        wheres.append(f"user_id = '{user_id}'")
+        wheres.append(_sql_equals("user_id", user_id))
 
     where_clause = " AND ".join(wheres)
     sql = f"""
@@ -200,7 +210,7 @@ async def funnel(
     """Full funnel with absolute counts and step-over-step drop-off rates."""
     client     = await get_client()
     since      = _parse_window(window)
-    cat_filter = f"AND category = '{category}'" if category else ""
+    cat_filter = f"AND {_sql_equals('category', category)}" if category else ""
     sql = f"""
         SELECT
             countIf(event_type = 'view')        AS views,
@@ -239,7 +249,7 @@ async def timeseries(
     client    = await get_client()
     since     = _parse_window(window)
     trunc     = {"minute": "toStartOfMinute", "hour": "toStartOfHour", "day": "toStartOfDay"}[bucket]
-    et_filter = f"AND event_type = '{event_type}'" if event_type else ""
+    et_filter = f"AND {_sql_equals('event_type', event_type)}" if event_type else ""
     sql = f"""
         SELECT
             {trunc}(timestamp) AS bucket,
@@ -346,7 +356,7 @@ async def user_journey(
             min(timestamp)                           AS first_seen,
             max(timestamp)                           AS last_seen
         FROM {TABLE}
-        WHERE user_id = '{user_id}'
+                WHERE {_sql_equals('user_id', user_id)}
           AND timestamp >= {since}
     """
     summary_result = await client.query(summary_sql)
@@ -361,7 +371,7 @@ async def user_journey(
     events_sql = f"""
         SELECT event_id, event_type, product_id, price, timestamp, category
         FROM {TABLE}
-        WHERE user_id = '{user_id}'
+                WHERE {_sql_equals('user_id', user_id)}
           AND timestamp >= {since}
         ORDER BY timestamp ASC
         LIMIT 200

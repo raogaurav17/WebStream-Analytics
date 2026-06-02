@@ -77,7 +77,7 @@ def write_partition_to_clickhouse(rows):
 
     payload = "\n".join(lines).encode("utf-8")
 
-    # ClickHouse HTTP API: POST body is the INSERT command + data
+    # The POST body is a newline-separated list of JSON objects.
     query = f"INSERT INTO {CLICKHOUSE_DB}.{CLICKHOUSE_TABLE} FORMAT JSONEachRow"
     full_payload = (query + "\n" + "\n".join(lines)).encode("utf-8")
     

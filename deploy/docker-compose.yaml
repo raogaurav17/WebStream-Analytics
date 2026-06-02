@@ -13,13 +13,9 @@
 #   2. Run: docker-compose up -d
 # ==============================================================================
 
-version: '3.8'
-
 services:
 
-  # ----------------------------------------------------------------------------
   # Zookeeper - Kafka coordination
-  # ----------------------------------------------------------------------------
   zookeeper:
     image: wurstmeister/zookeeper:latest
     container_name: zookeeper
@@ -34,11 +30,9 @@ services:
       timeout: 5s
       retries: 5
 
-  # ----------------------------------------------------------------------------
   # Kafka - Event streaming broker
   #   INTERNAL://kafka:29092  -> container-to-container (Spark)
   #   EXTERNAL://localhost:9092 -> host machine (producer scripts)
-  # ----------------------------------------------------------------------------
   kafka:
     image: wurstmeister/kafka:latest
     container_name: kafka
@@ -70,15 +64,9 @@ services:
       timeout: 10s
       retries: 5
 
-  # ----------------------------------------------------------------------------
   # ClickHouse - OLAP analytical database
   #   Port 8123: HTTP interface (JDBC, REST API)
   #   Port 9000: Native TCP protocol
-  #
-  # NOTE: CLICKHOUSE_DB in environment only sets the default DB shown in the
-  # client - tables are created in 'default' database by init-clickhouse.ps1.
-  # The stream_processor.py connects to 'default' via JDBC.
-  # ----------------------------------------------------------------------------
   clickhouse:
     image: clickhouse/clickhouse-server:24.3   # Pin to stable LTS version
     container_name: clickhouse
@@ -105,14 +93,9 @@ services:
       timeout: 5s
       retries: 5
 
-  # ----------------------------------------------------------------------------
   # Spark Master - Job orchestrator (local mode)
   #   Web UI:  http://localhost:8081
   #   Submit:  spark://localhost:7077
-  #
-  # spark_jobs/ is mounted at /opt/spark-apps inside the container.
-  # The clickhouse-jdbc-0.6.4-shaded.jar must be present in spark_jobs/.
-  # ----------------------------------------------------------------------------
   spark-master:
     image: apache/spark:3.5.0
     build:
@@ -141,9 +124,7 @@ services:
       - analytics-net
     restart: unless-stopped
 
-# ------------------------------------------------------------------------------
 # Networks & Volumes
-# ------------------------------------------------------------------------------
 networks:
   analytics-net:
     driver: bridge

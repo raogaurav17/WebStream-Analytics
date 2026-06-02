@@ -22,9 +22,7 @@ import os
 import sys
 import math
 
-# ---------------------------------------------------------------------------
 # Product catalogue
-# ---------------------------------------------------------------------------
 
 CATEGORIES = ["electronics", "clothing", "furniture", "food", "books", "sports"]
 
@@ -37,17 +35,17 @@ PRICE_RANGES = {
     "sports":      (20.0,    500.0),
 }
 
-# Each product has a tier that controls its popularity and conversion rate.
-# tier: "viral" | "popular" | "niche"
+# Product popularity tier (viral, popular, niche).
+# This affects how often a product is viewed and its conversion rate.
 PRODUCTS: list[dict] = []
 for pid in range(1, 501):
     cat = random.choice(CATEGORIES)
     roll = random.random()
-    if roll < 0.05:          # 5 % viral
+    if roll < 0.05:          # 5% viral
         tier = "viral"
-    elif roll < 0.25:        # 20 % popular
+    elif roll < 0.25:        # 20% popular
         tier = "popular"
-    else:                    # 75 % niche
+    else:                    # 75% niche
         tier = "niche"
     lo, hi = PRICE_RANGES[cat]
     PRODUCTS.append({
@@ -57,30 +55,22 @@ for pid in range(1, 501):
         "price":      round(random.uniform(lo, hi), 2),
     })
 
-# Index products for weighted sampling
+# Weighted sampling index for products.
 _TIER_WEIGHTS = {"viral": 12, "popular": 4, "niche": 1}
 _PRODUCT_WEIGHTS = [_TIER_WEIGHTS[p["tier"]] for p in PRODUCTS]
 
 def pick_product() -> dict:
     return random.choices(PRODUCTS, weights=_PRODUCT_WEIGHTS, k=1)[0]
 
-# ---------------------------------------------------------------------------
 # User personas
-# ---------------------------------------------------------------------------
 
 class UserPersona:
     """Encapsulates a user's behavioural profile."""
 
     TYPES = ["browser", "impulse_buyer", "researcher", "loyalist"]
 
-    # Conditional drop-off at each funnel step (given previous step happened).
-    # Tuple = (view->click, click->cart, cart->purchase)
-    # Net CVR = product of all three:
-    #   browser:       0.12 * 0.20 * 0.08  = ~0.2%
-    #   impulse_buyer: 0.35 * 0.50 * 0.25  = ~4.4%
-    #   researcher:    0.30 * 0.35 * 0.18  = ~1.9%
-    #   loyalist:      0.40 * 0.55 * 0.30  = ~6.6%
-    # Blended ~3.3% across equal persona mix -- in line with industry average
+    # Drop-off probabilities at each funnel step.
+    # (view->click, click->cart, cart->purchase)
     STEP_PROBS = {
         "browser":       (0.12, 0.20, 0.08),
         "impulse_buyer": (0.35, 0.50, 0.25),
@@ -88,7 +78,7 @@ class UserPersona:
         "loyalist":      (0.40, 0.55, 0.30),
     }
 
-    # Average seconds between two events for this persona
+    # Avg seconds between events.
     THINK_TIME = {
         "browser":       0.8,
         "impulse_buyer": 0.3,
@@ -141,9 +131,7 @@ class UserPersona:
         }
 
 
-# ---------------------------------------------------------------------------
 # Traffic-spike model
-# ---------------------------------------------------------------------------
 
 class TrafficModel:
     """
@@ -170,18 +158,18 @@ class TrafficModel:
     # -- helpers -------------------------------------------------------------
 
     def _time_of_day_multiplier(self) -> float:
-        """Smooth sinusoidal curve peaking at noon and 8 pm (simulated fast)."""
-        # We compress one "day" into ~120 seconds for demo visibility
-        t   = (time.time() % 120) / 120          # [0,1) within fake day
-        hr  = t * 24                             # fake hour
-        # Two peaks: noon (12) and evening (20)
+        """Sinusoidal curve peaking at noon and 8 pm."""
+        # Compress a "day" into ~120 seconds for demo visibility.
+        t   = (time.time() % 120) / 120
+        hr  = t * 24
+        # Two peaks: noon (12) and evening (20).
         lunch   = math.exp(-0.5 * ((hr - 12) / 2) ** 2)
         evening = math.exp(-0.5 * ((hr - 20) / 2) ** 2)
         base    = 0.3
         return base + 0.5 * lunch + 0.7 * evening
 
     def _flash_sale_multiplier(self, now: float) -> float:
-        """Scheduled flash sales every ~90 s, last 10 s, 4× spike."""
+        """Scheduled flash sales every ~90s, lasting 10s, with a 4x spike."""
         cycle = now % 90
         if cycle < 10:
             ramp = math.sin(math.pi * cycle / 10)
@@ -189,7 +177,7 @@ class TrafficModel:
         return 1.0
 
     def _viral_burst_multiplier(self, now: float) -> float:
-        """Random viral bursts: 2–5× for 5–15 s, every 30–120 s."""
+        """Random viral bursts: 2-5x traffic for 5-15s, every 30-120s."""
         if now >= self._next_burst_at:
             self._burst_intensity = random.uniform(2.0, 5.0)
             self._burst_duration  = random.uniform(5.0, 15.0)
@@ -205,10 +193,6 @@ class TrafficModel:
     def effective_rate(self) -> float:
         return self.base_rate * self.multiplier()
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Realistic E-Commerce Event Producer")
@@ -271,8 +255,8 @@ def main():
             user_id = random.choice(user_ids)
             persona = personas[user_id]
 
-            # Run a complete session for this user: view → (click → cart → purchase)?
-            # Each step has a think-time delay so events feel spread out in time.
+            # A user's session is a sequence of events, starting with a view.
+            # The user may drop off at any subsequent step.
             session_events = persona.run_session()
 
             for event in session_events:
@@ -286,7 +270,7 @@ def main():
                     if error_count % 10 == 1:
                         print(f"⚠️   Kafka send error: {str(e)[:80]}")
 
-            # Progress summary every 200 events
+            # Print progress summary.
             if event_count % 200 == 0 and event_count > 0:
                 mult = traffic.multiplier()
                 spike_tag = ""

@@ -21,8 +21,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="E-Commerce Analytics API",
-    description="Real-time analytics over the Kafka→ClickHouse events pipeline",
+    title="WebStream Analytics API",
+    description="Real-time analytics over the Kafka -> ClickHouse events pipeline",
     version="1.0.0",
     lifespan=lifespan,
 )

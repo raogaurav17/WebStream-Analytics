@@ -35,7 +35,7 @@ async def connect_to_db():
         database=CH_DB,
     )
     await _async_client.query("SELECT 1")
-    print(f"✓ Connected to ClickHouse (async) at {CH_HOST}:{CH_PORT}")
+    print(f"Connected to ClickHouse at {CH_HOST}:{CH_PORT}")
 
 
 async def close_db_connection():
@@ -43,4 +43,4 @@ async def close_db_connection():
     global _async_client
     if _async_client:
         await _async_client.close()
-        print("✓ ClickHouse async connection closed")
+        print("ClickHouse async connection closed")

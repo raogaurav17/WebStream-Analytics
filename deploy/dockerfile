@@ -1,19 +1,17 @@
-# ==============================================================================
-# Apache Spark Streaming Application Image
-# ==============================================================================
-# Base:    apache/spark:3.5.0
-# Adds:    Python3, pip, requests library, PySpark environment config
-# ==============================================================================
+# Docker image for the Spark streaming application.
+# Base: apache/spark:3.5.0
+# Adds Python dependencies and the ClickHouse JDBC driver.
 
 FROM apache/spark:3.5.0
 
+# Switch to root to install packages
 USER root
 
-# ==============================================================================
-# Install Python dependencies
-# ==============================================================================
-# requests: Used by stream_processor.py to write to ClickHouse HTTP API
-# (urllib is stdlib but requests gives cleaner error handling if needed later)
+# Install Python and networking tools.
+# - python3-pip: For installing Python packages.
+# - curl: For downloading the JDBC driver.
+# - netcat-openbsd: For health checks.
+# - requests: Used by the stream processor to write to ClickHouse.
 RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends \
     python3-pip \
@@ -23,31 +21,25 @@ RUN apt-get update -qq && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# ==============================================================================
-# Spark environment
-# ==============================================================================
-# SPARK_HOME and PATH are already set in the base image but re-declared
-# here for clarity and to ensure they survive any ENV layering.
+# Configure the Spark environment.
+# SPARK_HOME and PATH are set in the base image but re-declared for clarity.
 ENV SPARK_HOME=/opt/spark
 ENV PATH="/opt/spark/bin:/opt/spark/sbin:${PATH}"
 
-# PySpark Python runtime - driver and executor must match to avoid
-# serialization errors when shipping closures across the cluster.
+# Set the Python runtime for PySpark.
+# This ensures the driver and executors use the same Python version.
 ENV PYSPARK_PYTHON=python3
 ENV PYSPARK_DRIVER_PYTHON=python3
 
-# Increase default network timeout to handle slow jar downloads at startup
+# Increase network timeout for spark-submit to handle slow JAR downloads.
 ENV SPARK_SUBMIT_OPTS="-Dnetworkaddress.cache.ttl=60"
 
-# ==============================================================================
-# Pre-fetch the ClickHouse JDBC shaded JAR into the image
-# so spark-submit doesn't need --jars at runtime and avoids download delays.
-# Downloaded from Maven Central at build time.
-# ==============================================================================
+# Pre-fetch the ClickHouse JDBC driver.
+# This avoids download delays at runtime when submitting the Spark job.
 RUN curl -fsSL \
     https://repo1.maven.org/maven2/com/clickhouse/clickhouse-jdbc/0.6.4/clickhouse-jdbc-0.6.4-shaded.jar \
     -o /opt/spark/jars/clickhouse-jdbc-0.6.4-shaded.jar && \
     ls -lh /opt/spark/jars/clickhouse-jdbc-0.6.4-shaded.jar
 
-# Return to non-root spark user for security
+# Switch back to the non-root spark user
 USER spark

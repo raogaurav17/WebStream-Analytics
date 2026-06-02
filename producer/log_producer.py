@@ -217,7 +217,7 @@ def main():
             max_in_flight_requests_per_connection=1,
         )
     except Exception as e:
-        print(f"❌  Failed to connect to Kafka at {args.broker}")
+        print(f"Failed to connect to Kafka at {args.broker}")
         print(f"    Error: {e}")
         sys.exit(1)
 
@@ -230,13 +230,13 @@ def main():
     traffic = TrafficModel(args.rate)
 
     print("─" * 55)
-    print("  🛒  Realistic E-Commerce Event Producer")
+    print("  E-Commerce Event Producer")
     print("─" * 55)
-    print(f"  Broker    : {args.broker}")
-    print(f"  Base rate : {args.rate} events/s  (spikes apply)")
-    print(f"  Users     : {args.users}  ({len([p for p in personas.values() if p.ptype=='impulse_buyer'])} impulse buyers, "
+    print(f"  Broker:    {args.broker}")
+    print(f"  Base rate: {args.rate} events/s (spikes apply)")
+    print(f"  Users:     {args.users} ({len([p for p in personas.values() if p.ptype=='impulse_buyer'])} impulse buyers, "
           f"{len([p for p in personas.values() if p.ptype=='browser'])} browsers, …)")
-    print(f"  Products  : {len(PRODUCTS)}  "
+    print(f"  Products:  {len(PRODUCTS)} "
           f"({sum(1 for p in PRODUCTS if p['tier']=='viral')} viral, "
           f"{sum(1 for p in PRODUCTS if p['tier']=='popular')} popular, "
           f"{sum(1 for p in PRODUCTS if p['tier']=='niche')} niche)")
@@ -268,26 +268,26 @@ def main():
                 except KafkaError as e:
                     error_count += 1
                     if error_count % 10 == 1:
-                        print(f"⚠️   Kafka send error: {str(e)[:80]}")
+                        print(f"Kafka send error: {str(e)[:80]}")
 
             # Print progress summary.
             if event_count % 200 == 0 and event_count > 0:
                 mult = traffic.multiplier()
                 spike_tag = ""
                 if mult > 3.5:
-                    spike_tag = "  🚀 VIRAL BURST"
+                    spike_tag = "  (VIRAL BURST)"
                 elif mult > 2.0:
-                    spike_tag = "  ⚡ FLASH SALE"
+                    spike_tag = "  (FLASH SALE)"
                 elif mult > 1.3:
-                    spike_tag = "  📈 peak hour"
+                    spike_tag = "  (peak hour)"
 
                 conv_rate = (stats["purchase"] / max(stats["view"], 1)) * 100
                 print(
-                    f"  ✓ {event_count:>6} sent  |  "
-                    f"×{mult:.1f} rate={rate:.1f}/s  |  "
-                    f"view={stats['view']}  click={stats['click']}  "
-                    f"cart={stats['add_to_cart']}  buy={stats['purchase']}  "
-                    f"CVR={conv_rate:.1f}%"
+                    f"Sent {event_count:>6} events | "
+                    f"Rate: {rate:.1f}/s (x{mult:.1f}) | "
+                    f"Funnel: view={stats['view']}, click={stats['click']}, "
+                    f"cart={stats['add_to_cart']}, buy={stats['purchase']} | "
+                    f"CVR: {conv_rate:.1f}%"
                     f"{spike_tag}"
                 )
 

@@ -7,7 +7,6 @@ from pyspark.sql.types import StructType, StructField, StringType, DoubleType, T
 
 import os
 import urllib.request
-import urllib.parse
 import json
 
 CLICKHOUSE_USER     = os.getenv("CLICKHOUSE_USER", "default")
@@ -18,7 +17,7 @@ CLICKHOUSE_DB       = "default"
 CLICKHOUSE_TABLE    = "events"
 
 conf = SparkConf()
-conf.set("spark.sql.streaming.checkpointLocation", "/opt/spark-apps/checkpoint_v2")
+conf.set("spark.sql.streaming.checkpointLocation", "/opt/spark-apps/checkpoint")
 
 spark = SparkSession.builder \
     .appName("ECommerceEventProcessor") \
@@ -75,7 +74,6 @@ def write_partition_to_clickhouse(rows):
         }
         lines.append(json.dumps(record))
 
-    payload = "\n".join(lines).encode("utf-8")
 
     # The POST body is a newline-separated list of JSON objects.
     query = f"INSERT INTO {CLICKHOUSE_DB}.{CLICKHOUSE_TABLE} FORMAT JSONEachRow"

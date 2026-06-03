@@ -41,5 +41,9 @@ RUN curl -fsSL \
     -o /opt/spark/jars/clickhouse-jdbc-0.6.4-shaded.jar && \
     ls -lh /opt/spark/jars/clickhouse-jdbc-0.6.4-shaded.jar
 
+# Create and set permissions for the app and checkpoint directories
+RUN mkdir -p /opt/spark-apps/checkpoint && \
+    chown -R spark:spark /opt/spark-apps
+
 # Switch back to the non-root spark user
 USER spark

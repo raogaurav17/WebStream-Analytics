@@ -271,7 +271,7 @@ def main():
                         print(f"Kafka send error: {str(e)[:80]}")
 
             # Print progress summary.
-            if event_count % 200 == 0 and event_count > 0:
+            if event_count % 200 == 0:
                 mult = traffic.multiplier()
                 spike_tag = ""
                 if mult > 3.5:

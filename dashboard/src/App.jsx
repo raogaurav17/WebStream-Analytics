@@ -153,7 +153,7 @@ export default function App() {
           ◈ STREAM ANALYTICS · KAFKA → CLICKHOUSE PIPELINE
         </span>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-muted)' }}>
-          FastAPI · ClickHouse · React · Recharts
+          Go · ClickHouse · React · Recharts
         </span>
       </footer>
 

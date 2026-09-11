@@ -4,15 +4,15 @@
 <details>
 <summary><strong>Highlights</strong></summary>
 
-- One-line pitch: demo-ready streaming analytics stack that generates synthetic e‑commerce events, ingests via Kafka, processes with Spark, stores aggregates in ClickHouse, and serves read-only analytics via a FastAPI backend with a React dashboard.
+- One-line pitch: demo-ready streaming analytics stack that generates synthetic e‑commerce events, ingests via Kafka, processes with Spark, stores aggregates in ClickHouse, and serves read-only analytics via a Go backend with a React dashboard.
 - Quick demo: start `docker-compose`, run `./run_job.ps1`, open `http://localhost:8000/docs`, and then the dashboard at `http://localhost:3000`.
-- Tech highlights: ClickHouse for OLAP, Spark for stream transforms, Kafka for durable ingest, FastAPI for performant read APIs, React/Vite for a lightweight dashboard.
+- Tech highlights: ClickHouse for OLAP, Spark for stream transforms, Kafka for durable ingest, Go for performant read APIs, React/Vite for a lightweight dashboard.
 
 </details>
 
 ### Real-Time E-Commerce Analytics Pipeline
 
-> A fully containerised, end-to-end streaming platform — from synthetic event generation through Kafka and Spark, into ClickHouse, surfaced via a FastAPI backend and a dark-terminal React dashboard.
+> A fully containerised, end-to-end streaming platform — from synthetic event generation through Kafka and Spark, into ClickHouse, surfaced via a Go backend and a dark-terminal React dashboard.
 
 ![Dashboard Overview](docs/screenshots/overview.png)
 
@@ -48,7 +48,7 @@
 | Message Broker    | Apache Kafka + Zookeeper              | Durable event queue         |
 | Stream Processing | Apache Spark 3.5 Structured Streaming | 10s micro-batch ETL         |
 | Storage           | ClickHouse 24.3 (MergeTree)           | Columnar analytics DB       |
-| Backend API       | FastAPI · clickhouse-connect          | 10 analytics endpoints      |
+| Backend API       | Go · ClickHouse HTTP API              | 10 analytics endpoints      |
 | Frontend          | React 18 · Recharts · IBM Plex Mono   | Dashboard                   |
 | Orchestration     | Docker Compose · PowerShell           | One-command pipeline start  |
 
@@ -60,7 +60,7 @@
 web-traffic-analysis/
 │
 ├── api/
-│   ├── main.py                  # FastAPI — 10 analytics endpoints
+│   ├── main.go                  # Go — 10 analytics endpoints
 │   └── .env                     # ClickHouse connection config
 │
 ├── dashboard/
@@ -224,7 +224,7 @@ Spark Master UI is available at **http://localhost:8081** once running.
 | Setting         | Value                                                 |
 | --------------- | ----------------------------------------------------- |
 | Image           | `clickhouse/clickhouse-server:24.3`                   |
-| HTTP API port   | `8123` — used by Spark writes and FastAPI reads       |
+| HTTP API port   | `8123` — used by Spark writes and Go API reads         |
 | Native TCP port | `9000` — native client protocol                       |
 | Engine          | MergeTree                                             |
 | Partitioning    | Monthly (`toYYYYMM(timestamp)`)                       |
@@ -233,13 +233,13 @@ Spark Master UI is available at **http://localhost:8081** once running.
 
 ---
 
-### FastAPI Backend
+### Go Backend
 
-`api/main.py` provides 10 read-only analytics endpoints backed by ClickHouse SQL queries via `clickhouse-connect`. A single persistent client is created at startup via the `lifespan` context manager and shared across all requests.
+`api/main.go` provides 10 read-only analytics endpoints backed by ClickHouse SQL queries through its HTTP interface. The service uses Go's standard `net/http` package and keeps the dashboard's existing response contract unchanged.
 
 All time-windowed queries use ClickHouse's native `now() - INTERVAL N HOUR/DAY` expressions, ensuring partition pruning is applied automatically.
 
-Interactive docs auto-generated at **http://localhost:8000/docs**
+The API health endpoint is available at **http://localhost:8000/health**.
 
 <br/>
 
@@ -263,6 +263,7 @@ Polling strategy: `/metrics/realtime` is polled every 5 seconds for the live fee
 | -------------- | -------------- |
 | Docker Desktop | Latest         |
 | Python         | 3.10+          |
+| Go             | 1.22+          |
 | Node.js        | 18+            |
 | PowerShell     | 5.1+ (Windows) |
 
@@ -314,8 +315,7 @@ What this script does, in order:
 
 ```bash
 cd api
-pip install fastapi uvicorn clickhouse-connect python-dotenv
-uvicorn main:app --reload --port 8000
+go run .
 ```
 
 Verify: http://localhost:8000/health — should return `{"status": "ok", "clickhouse": "connected"}`
@@ -370,7 +370,7 @@ CH_DB=default
 | ClickHouse Native | `9000`  | Native TCP protocol                    |
 | Spark Master UI   | `8081`  | http://localhost:8081 — job monitoring |
 | Spark submission  | `7077`  | `spark-submit --master spark://...`    |
-| FastAPI           | `8000`  | http://localhost:8000                  |
+| Go API            | `8000`  | http://localhost:8000                  |
 | React             | `3000`  | http://localhost:3000                  |
 
 > ⚠️ **Security note:** Kafka uses PLAINTEXT with no authentication — do not expose port `9092` publicly. ClickHouse is protected by username/password passed via environment variables.

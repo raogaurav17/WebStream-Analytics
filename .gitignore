@@ -75,4 +75,5 @@ build/
 **/htmlcov/
 
 node_modules/
+**/.next/
 *.csv

@@ -17,7 +17,8 @@ export function useApi(fetcher, deps = [], interval = null) {
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // The hook accepts a caller-provided dependency list for each API query.
+  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/use-memo
   }, deps);
 
   useEffect(() => {

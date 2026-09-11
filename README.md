@@ -6,7 +6,7 @@
 
 - One-line pitch: demo-ready streaming analytics stack that generates synthetic e‑commerce events, ingests via Kafka, processes with Spark, stores aggregates in ClickHouse, and serves read-only analytics via a Go backend with a React dashboard.
 - Quick demo: start `docker-compose`, run `./run_job.ps1`, open `http://localhost:8000/docs`, and then the dashboard at `http://localhost:3000`.
-- Tech highlights: ClickHouse for OLAP, Spark for stream transforms, Kafka for durable ingest, Go for performant read APIs, React/Vite for a lightweight dashboard.
+- Tech highlights: ClickHouse for OLAP, Spark for stream transforms, Kafka for durable ingest, Go for performant read APIs, and Next.js for the dashboard.
 
 </details>
 

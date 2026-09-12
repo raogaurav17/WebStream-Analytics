@@ -86,24 +86,18 @@ def write_partition_to_clickhouse(rows):
     req.add_header("X-ClickHouse-User", CLICKHOUSE_USER)
     req.add_header("X-ClickHouse-Key", CLICKHOUSE_PASSWORD)
 
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            resp.read()
-    except Exception as e:
-        print(f"ClickHouse write error: {str(e)}")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        resp.read()
 
 def write_to_sinks(batch_df, batch_id):
     """Process micro-batch and write to ClickHouse."""
 
-    if batch_df.count() == 0:
+    row_count = batch_df.count()
+    if row_count == 0:
         return
 
-    row_count = batch_df.count()
-    try:
-        batch_df.foreachPartition(write_partition_to_clickhouse)
-        print(f"Batch {batch_id}: {row_count} rows written")
-    except Exception as e:
-        print(f"Write failed: {str(e)[:500]}")
+    batch_df.foreachPartition(write_partition_to_clickhouse)
+    print(f"Batch {batch_id}: {row_count} rows written")
 
 print("\nStarting streaming pipeline...")
 print(f"Kafka topic: events") 

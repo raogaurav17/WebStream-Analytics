@@ -27,7 +27,7 @@ cd ..
 
 # Start Event Producer
 echo -e "\033[36mStarting Event Producer...\033[0m"
-docker exec -d spark-master python3 /opt/spark-apps/log_producer.py --rate 5 --users 100 || true
+docker exec -d spark-master python3 /opt/spark-producer/log_producer.py --rate 5 --users 100
 
 # Stop any previous Spark jobs
 echo -e "\033[33mStopping any previous Spark jobs...\033[0m"
@@ -46,7 +46,7 @@ docker exec spark-master /opt/spark/bin/spark-submit \
     --deploy-mode client \
     --conf "$JAVA_OPTS" \
     --packages "$PACKAGES" \
-    --jars /opt/spark-apps/clickhouse-jdbc-0.6.4-shaded.jar \
+    --jars /opt/spark/jars/clickhouse-jdbc-0.6.4-shaded.jar \
     /opt/spark-apps/stream_processor.py 2>&1 | tee spark_job.log
 
 EXIT_CODE=$?

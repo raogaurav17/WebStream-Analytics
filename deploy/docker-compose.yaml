@@ -92,6 +92,7 @@ services:
       - "7077:7077"   # Cluster submission
     volumes:
       - ../spark_jobs:/opt/spark-apps
+      - ../producer:/opt/spark-producer
     depends_on:
       kafka:
         condition: service_healthy

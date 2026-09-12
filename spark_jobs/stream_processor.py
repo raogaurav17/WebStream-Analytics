@@ -17,7 +17,7 @@ CLICKHOUSE_DB       = "default"
 CLICKHOUSE_TABLE    = "events"
 
 conf = SparkConf()
-conf.set("spark.sql.streaming.checkpointLocation", "/opt/spark-apps/checkpoint")
+conf.set("spark.sql.streaming.checkpointLocation", "/tmp/spark-checkpoints")
 
 spark = SparkSession.builder \
     .appName("ECommerceEventProcessor") \

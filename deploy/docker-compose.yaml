@@ -93,6 +93,7 @@ services:
     volumes:
       - ../spark_jobs:/opt/spark-apps
       - ../producer:/opt/spark-producer
+      - spark_checkpoints:/tmp/spark-checkpoints
     depends_on:
       kafka:
         condition: service_healthy
@@ -110,3 +111,4 @@ networks:
 volumes:
   clickhouse_data:
   kafka_data:
+  spark_checkpoints:

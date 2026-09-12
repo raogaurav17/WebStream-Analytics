@@ -77,7 +77,7 @@ services:
     image: apache/spark:3.5.0
     build:
       context: ..
-      dockerfile: deploy/Dockerfile
+      dockerfile: deploy/dockerfile
     container_name: spark-master
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     environment:
